@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS HUD</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        #video {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: 1;
+        }
+        
+        .hud-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 2;
+            pointer-events: none;
+        }
+        
+        /* Crosshair */
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            border: 2px solid #00f3ff;
+            border-radius: 50%;
+            opacity: 0.6;
+        }
+        
+        .crosshair::before,
+        .crosshair::after {
+            content: '';
+            position: absolute;
+            background: #00f3ff;
+        }
+        
+        .crosshair::before {
+            width: 2px;
+            height: 20px;
+            left: 50%;
+            top: -22px;
+            transform: translateX(-50%);
+        }
+        
+        .crosshair::after {
+            width: 20px;
+            height: 2px;
+            top: 50%;
+            left: -22px;
+            transform: translateY(-50%);
+        }
+        
+        /* Top Left - Time and Date */
+        .top-left {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            text-align: left;
+            color: #00f3ff;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .time {
+            font-size: 2em;
+            color: #00f3ff;
+            text-shadow: 0 0 10px #00f3ff, 0 0 5px #000;
+            margin-bottom: 5px;
+        }
+        
+        .date {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        /* Top Right - System Stats */
+        .top-right {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            text-align: right;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .system-title {
+            font-size: 1em;
+            margin-bottom: 10px;
+            color: #00f3ff;
+            text-shadow: 0 0 10px #00f3ff, 0 0 5px #000;
+        }
+        
+        .stat-bar {
+            margin: 8px 0;
+            text-align: right;
+        }
+        
+        .stat-label {
+            font-size: 0.85em;
+            margin-bottom: 5px;
+            color: #00f3ff;
+            text-shadow: 0 0 5px #000;
+        }
+        
+        .bar-container {
+            width: 180px;
+            height: 18px;
+            background: rgba(0, 243, 255, 0.2);
+            border: 1px solid #00f3ff;
+            display: inline-block;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00f3ff, #00a8cc);
+            transition: width 0.5s ease;
+            box-shadow: 0 0 10px #00f3ff;
+        }
+        
+        /* Bottom Left - Battery Info */
+        .bottom-left {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .battery-display {
+            font-size: 1em;
+            color: #00f3ff;
+            text-shadow: 0 0 10px #00f3ff, 0 0 5px #000;
+        }
+        
+        .battery-percent {
+            font-size: 2.2em;
+            text-shadow: 0 0 15px, 0 0 8px #000;
+        }
+        
+        .battery-status {
+            font-size: 0.85em;
+            opacity: 0.9;
+            margin-top: 5px;
+            color: #00f3ff;
+        }
+        
+        /* Bottom Right - Voice Status */
+        .bottom-right {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            text-align: right;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .voice-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            background: #ff0000;
+            border-radius: 50%;
+            box-shadow: 0 0 20px #ff0000;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.1); }
+        }
+        
+        .voice-text {
+            font-size: 1.1em;
+            color: #00f3ff;
+            text-shadow: 0 0 10px #00f3ff, 0 0 5px #000;
+        }
+        
+        /* Scanning Lines */
+        .scan-line {
+            position: absolute;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00f3ff, transparent);
+            animation: scan 4s linear infinite;
+            opacity: 0.3;
+        }
+        
+        @keyframes scan {
+            0% { top: 0; }
+            100% { top: 100%; }
+        }
+        
+        /* Corner Brackets */
+        .corner {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 2px solid #00f3ff;
+            opacity: 0.6;
+        }
+        
+        .corner.tl {
+            top: 10px;
+            left: 10px;
+            border-right: none;
+            border-bottom: none;
+        }
+        
+        .corner.tr {
+            top: 10px;
+            right: 10px;
+            border-left: none;
+            border-bottom: none;
+        }
+        
+        .corner.bl {
+            bottom: 10px;
+            left: 10px;
+            border-right: none;
+            border-top: none;
+        }
+        
+        .corner.br {
+            bottom: 10px;
+            right: 10px;
+            border-left: none;
+            border-top: none;
+        }
+
+        /* Camera error message */
+        .camera-error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #00f3ff;
+            padding: 20px;
+            border: 2px solid #00f3ff;
+            border-radius: 10px;
+            text-align: center;
+            max-width: 400px;
+            z-index: 3;
+            display: none;
+        }
+
+        .camera-error h2 {
+            margin-bottom: 10px;
+            color: #ff0000;
+        }
+
+        .camera-error button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: #00f3ff;
+            color: #000;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 1em;
+        }
+
+        .camera-error button:hover {
+            background: #00a8cc;
+        }
+    </style>
+</head>
+<body>
+    <!-- Camera Video Feed -->
+    <video id="video" autoplay playsinline></video>
+
+    <!-- Camera Error Message -->
+    <div class="camera-error" id="camera-error">
+        <h2>⚠️ CAMERA ACCESS NEEDED</h2>
+        <p>JARVIS needs camera access to show the HUD overlay.</p>
+        <p style="font-size: 0.9em; margin-top: 10px;">Click "Allow" when your browser asks for camera permission.</p>
+        <button onclick="startCamera()">TRY AGAIN</button>
+    </div>
+
+    <!-- HUD Overlay -->
+    <div class="hud-container">
+        <!-- Scan Line -->
+        <div class="scan-line"></div>
+        
+        <!-- Corner Brackets -->
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        
+        <!-- Crosshair -->
+        <div class="crosshair"></div>
+        
+        <!-- Top Left - Time/Date -->
+        <div class="top-left">
+            <div class="time" id="time">--:-- --</div>
+            <div class="date" id="date">LOADING...</div>
+        </div>
+        
+        <!-- Top Right - System Stats -->
+        <div class="top-right">
+            <div class="system-title">SYSTEM MONITOR</div>
+            <div class="stat-bar">
+                <div class="stat-label">BATTERY: <span id="battery-val">---%</span></div>
+                <div class="bar-container">
+                    <div class="bar-fill" id="battery-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+            <div class="stat-bar">
+                <div class="stat-label">MEMORY: <span id="mem-val">---%</span></div>
+                <div class="bar-container">
+                    <div class="bar-fill" id="mem-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+            <div class="stat-bar">
+                <div class="stat-label">NETWORK: <span id="network-val">---ms</span></div>
+                <div class="bar-container">
+                    <div class="bar-fill" id="network-bar" style="width: 0%;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bottom Left - Battery -->
+        <div class="bottom-left">
+            <div class="battery-display">POWER LEVEL</div>
+            <div class="battery-percent" id="battery-main">---%</div>
+            <div class="battery-status" id="battery-status">Checking...</div>
+        </div>
+        
+        <!-- Bottom Right - Voice Status -->
+        <div class="bottom-right">
+            <div class="voice-indicator">
+                <div class="status-dot"></div>
+                <div class="voice-text">JARVIS READY</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Start camera
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'environment' // Use back camera on phones
+                    } 
+                });
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                document.getElementById('camera-error').style.display = 'none';
+            } catch (err) {
+                console.error('Camera error:', err);
+                document.getElementById('camera-error').style.display = 'block';
+            }
+        }
+
+        // Update time for Clive, Iowa
+        function updateTime() {
+            const now = new Date();
+            
+            const timeStr = now.toLocaleTimeString('en-US', { 
+                hour12: true,
+                hour: 'numeric',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZone: 'America/Chicago'
+            });
+            
+            const dateStr = now.toLocaleDateString('en-US', { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric',
+                timeZone: 'America/Chicago'
+            });
+            
+            document.getElementById('time').textContent = timeStr;
+            document.getElementById('date').textContent = dateStr.toUpperCase();
+        }
+
+        // Get real battery info
+        async function updateBattery() {
+            if ('getBattery' in navigator) {
+                try {
+                    const battery = await navigator.getBattery();
+                    const level = Math.round(battery.level * 100);
+                    
+                    document.getElementById('battery-val').textContent = level + '%';
+                    document.getElementById('battery-bar').style.width = level + '%';
+                    document.getElementById('battery-main').textContent = level + '%';
+                    
+                    if (battery.charging) {
+                        document.getElementById('battery-status').textContent = 'Charging';
+                        document.getElementById('battery-main').style.color = '#ffff00';
+                        document.getElementById('battery-main').style.textShadow = '0 0 15px #ffff00, 0 0 8px #000';
+                    } else {
+                        document.getElementById('battery-status').textContent = 'On Battery';
+                        if (level > 20) {
+                            document.getElementById('battery-main').style.color = '#00ff00';
+                            document.getElementById('battery-main').style.textShadow = '0 0 15px #00ff00, 0 0 8px #000';
+                        } else {
+                            document.getElementById('battery-main').style.color = '#ff0000';
+                            document.getElementById('battery-main').style.textShadow = '0 0 15px #ff0000, 0 0 8px #000';
+                        }
+                    }
+                    
+                    const bar = document.getElementById('battery-bar');
+                    if (level <= 20) {
+                        bar.style.background = 'linear-gradient(90deg, #ff0000, #cc0000)';
+                        bar.style.boxShadow = '0 0 10px #ff0000';
+                    } else if (level <= 50) {
+                        bar.style.background = 'linear-gradient(90deg, #ffff00, #cccc00)';
+                        bar.style.boxShadow = '0 0 10px #ffff00';
+                    } else {
+                        bar.style.background = 'linear-gradient(90deg, #00ff00, #00cc00)';
+                        bar.style.boxShadow = '0 0 10px #00ff00';
+                    }
+                } catch (e) {
+                    document.getElementById('battery-val').textContent = 'N/A';
+                    document.getElementById('battery-main').textContent = 'N/A';
+                    document.getElementById('battery-status').textContent = 'Not Available';
+                    document.getElementById('battery-main').style.color = '#00f3ff';
+                }
+            }
+        }
+
+        // Get real system memory
+        function updateMemory() {
+            if ('memory' in performance) {
+                const mem = performance.memory;
+                const used = (mem.usedJSHeapSize / mem.jsHeapSizeLimit * 100).toFixed(0);
+                document.getElementById('mem-val').textContent = used + '%';
+                document.getElementById('mem-bar').style.width = used + '%';
+            } else {
+                document.getElementById('mem-val').textContent = 'N/A';
+            }
+        }
+
+        // Check network ping
+        function updateNetwork() {
+            const start = performance.now();
+            fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' })
+                .then(() => {
+                    const ping = Math.round(performance.now() - start);
+                    document.getElementById('network-val').textContent = ping + 'ms';
+                    const quality = Math.max(0, Math.min(100, 100 - (ping / 5)));
+                    document.getElementById('network-bar').style.width = quality + '%';
+                })
+                .catch(() => {
+                    document.getElementById('network-val').textContent = 'OFFLINE';
+                    document.getElementById('network-bar').style.width = '0%';
+                });
+        }
+
+        // Initialize everything
+        startCamera();
+        updateTime();
+        updateBattery();
+        updateMemory();
+        updateNetwork();
+        
+        setInterval(updateTime, 1000);
+        setInterval(updateBattery, 5000);
+        setInterval(updateMemory, 2000);
+        setInterval(updateNetwork, 10000);
+    </script>
+</body>
+</html>
