@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stark HUD v8.0 - Quantum Nexus</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #020617;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            color: #38bdf8;
+            text-transform: uppercase;
+        }
+        
+        .tracker-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover; 
+            transform: scaleX(-1);
+        }
+
+        /* High-visibility contrast setups for the webcam layer */
+        #video-layer { z-index: 1; opacity: 0.25; filter: saturate(0.5) contrast(1.2); }
+        
+        /* The hand tracking skeleton canvas is pushed to high visibility priority */
+        #canvas-layer { z-index: 5; pointer-events: none; }
+        #three-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 2; pointer-events: none; }
+
+        #hud-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            padding: 15vh 40px 40px 40px;
+            box-sizing: border-box;
+        }
+
+        .hud-left {
+            width: 300px;
+            border-left: 2px solid #38bdf8;
+            padding-left: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            height: fit-content;
+        }
+
+        .hud-box {
+            background: rgba(2, 6, 23, 0.75);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            padding: 15px;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.15);
+        }
+
+        .hud-title {
+            font-size: 0.9rem;
+            font-weight: bold;
+            letter-spacing: 2px;
+            margin-bottom: 10px;
+            color: #7dd3fc;
+            border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+            padding-bottom: 5px;
+        }
+
+        #pinch-debug {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            white-space: pre-line;
+            line-height: 1.6;
+        }
+
+        .hud-right {
+            width: 350px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            height: 70vh;
+        }
+
+        #ai-chat-log {
+            flex-grow: 1;
+            background: rgba(2, 6, 23, 0.75);
+            border: 1px solid #38bdf8;
+            border-radius: 5px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: hidden;
+            box-shadow: inset 0 0 20px rgba(56, 189, 248, 0.15);
+            backdrop-filter: blur(8px);
+        }
+
+        .chat-msg {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            border-left: 2px solid #38bdf8;
+            padding-left: 10px;
+        }
+
+        .chat-ai { color: #bae6fd; }
+        .chat-user { color: #fde047; border-left: none; border-right: 2px solid #fde047; padding-right: 10px; text-align: right; }
+
+        .command-btn {
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid #38bdf8;
+            color: #38bdf8;
+            padding: 15px;
+            font-family: inherit;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            letter-spacing: 1px;
+            pointer-events: auto;
+            backdrop-filter: blur(4px);
+        }
+
+        .command-btn:hover { background: rgba(56, 189, 248, 0.3); box-shadow: 0 0 15px rgba(56, 189, 248, 0.4); }
+        .command-btn:active { background: rgba(56, 189, 248, 0.6); transform: scale(0.98); }
+        
+        .btn-highlight { border-color: #fde047; color: #fde047; }
+        .btn-highlight:hover { background: rgba(253, 224, 71, 0.2); box-shadow: 0 0 15px rgba(253, 224, 71, 0.3); }
+
+    </style>
+</head>
+<body>
+
+    <video id="video-layer" class="tracker-layer" autoplay playsinline webkit-playsinline muted></video>
+    <canvas id="three-canvas"></canvas>
+    <canvas id="canvas-layer" class="tracker-layer"></canvas>
+
+    <div id="hud-container">
+        <div class="hud-left">
+            <div class="hud-box">
+                <div class="hud-title">SYSTEM STATUS</div>
+                <div id="battery-level">POWER: SCANNING...</div>
+                <div>RENDER ENGINE: v8.0</div>
+                <div>SKELETON OVERLAY: FORCED_ON</div>
+            </div>
+            <div class="hud-box">
+                <div class="hud-title">GESTURE CONTROLS (AIR)</div>
+                <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.8;">
+                    LEFT PINCH: SPIN (X/Y)<br>
+                    RIGHT PINCH: PAN<br>
+                    BOTH PINCH: ZOOM
+                </div>
+            </div>
+            <div class="hud-box">
+                <div class="hud-title">PINCH METRICS</div>
+                <div id="pinch-debug">L PINCH RATIO: --&#10;R PINCH RATIO: --</div>
+            </div>
+        </div>
+
+        <div class="hud-right">
+            <div id="ai-chat-log">
+                <div class="chat-msg chat-ai">SYSTEM: Advanced tracking initialization sequence completed. Hand overlays forced to full visibility. Awaiting schematic input.</div>
+            </div>
+            
+            <input type="file" id="file-input" style="display: none;" accept=".stl,.obj,.glb,.gltf">
+            <div class="command-btn btn-highlight" id="upload-btn">UPLOAD 3D MODEL</div>
+            <div class="command-btn" id="reset-btn">RESET VIEW</div>
+        </div>
+    </div>
+
+    <script>
+        // --- 0. HARDWARE API INTEGRATION ---
+        function initBattery() {
+            if ('getBattery' in navigator) {
+                navigator.getBattery().then(function(battery) {
+                    const updateBattery = () => {
+                        const level = Math.round(battery.level * 100);
+                        const charging = battery.charging ? " (CHARGING)" : "";
+                        document.getElementById('battery-level').innerText = `POWER: ${level}%${charging}`;
+                        if (level <= 20 && !battery.charging) {
+                            document.getElementById('battery-level').style.color = '#ff0055';
+                        } else {
+                            document.getElementById('battery-level').style.color = '#38bdf8';
+                        }
+                    };
+                    updateBattery();
+                    battery.addEventListener('levelchange', updateBattery);
+                    battery.addEventListener('chargingchange', updateBattery);
+                });
+            } else {
+                document.getElementById('battery-level').innerText = `POWER: AUTOMATIC MAPPING`;
+            }
+        }
+        initBattery();
+
+        // --- 1. SET UP 3D SCENE (THREE.JS) ---
+        const threeCanvas = document.getElementById('three-canvas');
+        const scene = new THREE.Scene();
+        const camera3D = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+        const rimLight = new THREE.DirectionalLight(0x38bdf8, 1.0);
+        rimLight.position.set(-6, 2, -4);
+        scene.add(rimLight);
+
+        const hologramGroup = new THREE.Group();
+        scene.add(hologramGroup);
+
+        const ringGeo = new THREE.TorusGeometry(2.0, 0.05, 16, 100);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.5 });
+        const ring1 = new THREE.Mesh(ringGeo, ringMat);
+        ring1.rotation.x = Math.PI / 2;
+        const ring2 = new THREE.Mesh(ringGeo, ringMat);
+        ring2.rotation.y = Math.PI / 2;
+        hologramGroup.add(ring1, ring2);
+
+        camera3D.position.z = 7;
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+
+            hologramGroup.rotation.x = Math.max(-1.1, Math.min(1.1, hologramGroup.rotation.x));
+
+            if (hologramGroup.children.includes(ring1)) {
+                ring1.rotation.x += 0.01;
+                ring2.rotation.y -= 0.01;
+            }
+
+            renderer.render(scene, camera3D);
+        }
+        animate3D();
+
+        window.addEventListener('resize', () => {
+            camera3D.aspect = window.innerWidth / window.innerHeight;
+            camera3D.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        });
+
+        // --- 2. UI & FILE UPLOAD LOGIC ---
+        const chatLog = document.getElementById('ai-chat-log');
+
+        function addChatMessage(sender, text) {
+            const msg = document.createElement('div');
+            msg.className = `chat-msg ${sender === 'AI' ? 'chat-ai' : 'chat-user'}`;
+            msg.innerText = `${sender === 'AI' ? 'SYSTEM:' : 'YOU:'} ${text}`;
+            chatLog.appendChild(msg);
+            chatLog.scrollTop = chatLog.scrollHeight;
+            if (chatLog.children.length > 5) chatLog.removeChild(chatLog.firstChild);
+        }
+
+        const fileInput = document.getElementById('file-input');
+        
+        document.getElementById('upload-btn').addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            addChatMessage('USER', 'Reset view matrices.');
+            hologramGroup.position.set(0, 0, 0);
+            hologramGroup.scale.set(1, 1, 1);
+            hologramGroup.rotation.set(0, 0, 0);
+        });
+
+        fileInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const filename = file.name.toLowerCase();
+            addChatMessage('USER', `Upload ${file.name}`);
+            addChatMessage('AI', `Compiling structural coordinates for ${file.name}...`);
+
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                const contents = e.target.result;
+                hologramGroup.clear();
+                
+                try {
+                    if (filename.endsWith('.stl')) {
+                        const loader = new THREE.STLLoader();
+                        const geometry = loader.parse(contents);
+                        const material = new THREE.MeshStandardMaterial({ 
+                            color: 0x38bdf8, metalness: 0.8, roughness: 0.3 
+                        });
+                        const mesh = new THREE.Mesh(geometry, material);
+                        setupModel(mesh);
+                    } else if (filename.endsWith('.glb') || filename.endsWith('.gltf')) {
+                        const loader = new THREE.GLTFLoader();
+                        loader.parse(contents, '', function(gltf) {
+                            setupModel(gltf.scene);
+                        });
+                    } else if (filename.endsWith('.obj')) {
+                        const loader = new THREE.OBJLoader();
+                        const obj = loader.parse(contents);
+                        setupModel(obj);
+                    } else {
+                        addChatMessage('AI', 'ERROR: Unsupported file format. Use STL, OBJ, or GLB.');
+                    }
+                } catch(error) {
+                    addChatMessage('AI', 'ERROR: Geometry loading failed.');
+                    console.error(error);
+                }
+            };
+
+            if (filename.endsWith('.stl') || filename.endsWith('.glb') || filename.endsWith('.gltf')) {
+                reader.readAsArrayBuffer(file);
+            } else if (filename.endsWith('.obj')) {
+                reader.readAsText(file);
+            }
+        });
+
+        function setupModel(object) {
+            const box = new THREE.Box3().setFromObject(object);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = 5 / maxDim; 
+
+            object.scale.set(scale, scale, scale);
+            object.position.sub(center.multiplyScalar(scale)); 
+
+            const wrapper = new THREE.Group();
+            wrapper.add(object);
+            hologramGroup.add(wrapper);
+
+            hologramGroup.position.set(0, 0, 0);
+            hologramGroup.scale.set(1, 1, 1);
+            hologramGroup.rotation.set(0, 0, 0);
+            
+            addChatMessage('AI', 'Object layout synchronized into world matrix.');
+        }
+
+        // --- 3. MEDIAPIPE TRACKING LOOP ---
+        const videoElement = document.getElementById('video-layer');
+        const canvasElement = document.getElementById('canvas-layer');
+        const canvasCtx = canvasElement.getContext('2d');
+        canvasElement.width = window.innerWidth;
+        canvasElement.height = window.innerHeight;
+
+        const pinchDebug = document.getElementById('pinch-debug');
+
+        let previousLeftX = 0, previousLeftY = 0;
+        let previousRightX = 0, previousRightY = 0;
+        let previousPinchDistance = 0;
+
+        let leftPinchState = false;
+        let rightPinchState = false;
+
+        const PINCH_CLOSE_RATIO = 0.24; 
+        const PINCH_OPEN_RATIO  = 0.36; 
+        const PINCH_CONFIRM_FRAMES = 2; 
+
+        let leftPinchCandidateRef = { value: false, count: 0 };
+        let rightPinchCandidateRef = { value: false, count: 0 };
+
+        function getDistance(p1, p2) {
+            return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2) + Math.pow((p2.z||0) - (p1.z||0), 2));
+        }
+
+        function handScale(hand) {
+            return getDistance(hand[0], hand[9]) || 0.0001;
+        }
+
+        function rawPinch(hand, wasPinching) {
+            const dist = getDistance(hand[8], hand[4]) / handScale(hand);
+            if (wasPinching) {
+                return dist < PINCH_OPEN_RATIO;
+            } else {
+                return dist < PINCH_CLOSE_RATIO;
+            }
+        }
+
+        function updatePinchDebounced(hand, wasPinching, candidateRef) {
+            const raw = rawPinch(hand, wasPinching);
+            if (raw === wasPinching) {
+                candidateRef.count = 0;
+                return wasPinching;
+            }
+            if (wasPinching && !raw) {
+                candidateRef.count = 0;
+                return false;
+            }
+            if (raw === candidateRef.value) {
+                candidateRef.count++;
+            } else {
+                candidateRef.value = raw;
+                candidateRef.count = 1;
+            }
+            if (candidateRef.count >= PINCH_CONFIRM_FRAMES) {
+                candidateRef.count = 0;
+                return raw;
+            }
+            return wasPinching;
+        }
+
+        function onResults(results) {
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+
+                let leftHand = null;
+                let rightHand = null;
+
+                // Sort true physical hands using MediaPipe's deep data mapping
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const hand = results.multiHandLandmarks[i];
+                    const handedness = results.multiHandedness[i].label; 
+                    
+                    if (handedness === 'Right') {
+                        leftHand = hand;
+                    } else if (handedness === 'Left') {
+                        rightHand = hand;
+                    }
+
+                    // Forcing maximum contrast rendering for the hand tracking skeletons so they never look dull
+                    drawConnectors(canvasCtx, hand, HAND_CONNECTIONS, {color: '#00f0ff', lineWidth: 4});
+                    drawLandmarks(canvasCtx, hand, {color: '#fde047', lineWidth: 2, radius: 4});
+                }
+
+                let leftPinching = false;
+                let rightPinching = false;
+
+                if (leftHand) {
+                    leftPinching = updatePinchDebounced(leftHand, leftPinchState, leftPinchCandidateRef);
+                    leftPinchState = leftPinching;
+                } else {
+                    leftPinchState = false;
+                    leftPinchCandidateRef.count = 0;
+                }
+
+                if (rightHand) {
+                    rightPinching = updatePinchDebounced(rightHand, rightPinchState, rightPinchCandidateRef);
+                    rightPinchState = rightPinching;
+                } else {
+                    rightPinchState = false;
+                    rightPinchCandidateRef.count = 0;
+                }
+
+                const lRatio = leftHand ? (getDistance(leftHand[8], leftHand[4]) / handScale(leftHand)).toFixed(2) : '--';
+                const rRatio = rightHand ? (getDistance(rightHand[8], rightHand[4]) / handScale(rightHand)).toFixed(2) : '--';
+                if (pinchDebug) {
+                    pinchDebug.innerText = `L PINCH RATIO: ${lRatio} (${leftPinching ? 'ACTIVE' : 'READY'})\nR PINCH RATIO: ${rRatio} (${rightPinching ? 'ACTIVE' : 'READY'})`;
+                }
+
+                // --- STRICT 1-to-1 GESTURE MATH (No inertia, instant release stops) ---
+                if (leftPinching && rightPinching) {
+                    const currentDist = Math.abs(leftHand[8].x - rightHand[8].x);
+                    if (previousPinchDistance !== 0) {
+                        const delta = currentDist - previousPinchDistance;
+                        hologramGroup.scale.addScalar(delta * 5);
+                        hologramGroup.scale.clampScalar(0.2, 4.0);
+                    }
+                    previousPinchDistance = currentDist;
+                } else {
+                    previousPinchDistance = 0;
+                }
+
+                if (leftPinching && !rightPinching) {
+                    const currentX = leftHand[8].x;
+                    const currentY = leftHand[8].y;
+
+                    if (previousLeftX !== 0) {
+                        const deltaX = currentX - previousLeftX;
+                        const deltaY = currentY - previousLeftY;
+                        
+                        hologramGroup.rotation.y += deltaX * -4.5;
+                        hologramGroup.rotation.x += deltaY * 4.5;
+                    }
+                    previousLeftX = currentX;
+                    previousLeftY = currentY;
+                } else {
+                    previousLeftX = 0;
+                    previousLeftY = 0;
+                }
+
+                if (rightPinching && !leftPinching) {
+                    const currentX = rightHand[8].x;
+                    const currentY = rightHand[8].y;
+
+                    if (previousRightX !== 0) {
+                        const deltaX = currentX - previousRightX;
+                        const deltaY = currentY - previousRightY;
+                        
+                        hologramGroup.position.x += deltaX * -10;
+                        hologramGroup.position.y += deltaY * -10;
+                    }
+                    previousRightX = currentX;
+                    previousRightY = currentY;
+                } else {
+                    previousRightX = 0;
+                    previousRightY = 0;
+                }
+
+            } else {
+                leftPinchState = false;
+                rightPinchState = false;
+                if (pinchDebug) pinchDebug.innerText = '';
+            }
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+        
+        camera.start().catch(err => {
+            console.error("Camera failed:", err);
+            addChatMessage('AI', 'ERROR: Frame capture device failed to bind.');
+        });
+    </script>
+</body>
+</html>
